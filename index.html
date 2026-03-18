@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blob Tileset Template Generator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+    gap: 20px;
+  }
+  h1 { font-size: 1.4em; color: #fff; }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    background: #252525;
+    padding: 16px;
+    border-radius: 8px;
+    max-width: 720px;
+    width: 100%;
+  }
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .control-group label {
+    font-size: 0.75em;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .control-group input {
+    width: 72px;
+    padding: 6px 8px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 0.9em;
+  }
+  .section-label {
+    width: 100%;
+    font-size: 0.8em;
+    color: #777;
+    border-top: 1px solid #3a3a3a;
+    padding-top: 8px;
+    margin-top: 4px;
+  }
+  #preview-container {
+    background: #252525;
+    padding: 16px;
+    border-radius: 8px;
+    overflow: auto;
+    max-width: 95vw;
+  }
+  canvas { image-rendering: pixelated; }
+  button#download {
+    padding: 10px 24px;
+    background: #c44;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 1em;
+    cursor: pointer;
+  }
+  button#download:hover { background: #a33; }
+  button#generate {
+    padding: 8px 20px;
+    background: #555;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9em;
+    cursor: pointer;
+  }
+  button#generate:hover { background: #666; }
+  .info {
+    max-width: 720px;
+    background: #252525;
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 0.85em;
+    line-height: 1.5;
+    color: #aaa;
+  }
+  .info p { margin-bottom: 8px; }
+  .info p:last-child { margin-bottom: 0; }
+  .info strong { color: #ccc; }
+</style>
+</head>
+<body>
+
+<h1>Blob Tileset Template Generator</h1>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Tile Width (px)</label>
+    <input type="number" id="tileW" value="32" min="8" max="256">
+  </div>
+  <div class="control-group">
+    <label>Tile Height (px)</label>
+    <input type="number" id="tileH" value="32" min="8" max="256">
+  </div>
+  <div class="section-label">Variations (total slots per tile, including base)</div>
+
+  <div class="control-group">
+    <label>Global Default</label>
+    <input type="number" id="varGlobal" value="1" min="1" max="32">
+  </div>
+  <div class="control-group">
+    <label>Center</label>
+    <input type="number" id="varCenter" value="" min="1" max="32" placeholder="—">
+  </div>
+  <div class="control-group">
+    <label>Straight Edges</label>
+    <input type="number" id="varEdge" value="" min="1" max="32" placeholder="—">
+  </div>
+  <div class="control-group">
+    <label>Inner Corners</label>
+    <input type="number" id="varInner" value="" min="1" max="32" placeholder="—">
+  </div>
+  <div class="control-group">
+    <label>Outer Corners</label>
+    <input type="number" id="varOuter" value="" min="1" max="32" placeholder="—">
+  </div>
+
+  <div class="section-label"></div>
+  <div class="control-group">
+    <button id="generate">Generate</button>
+  </div>
+</div>
+
+<div id="preview-container">
+  <canvas id="canvas"></canvas>
+</div>
+
+<button id="download">Download PNG</button>
+
+<div class="info">
+  <p><strong>How to use:</strong> Set your tile dimensions and variation counts, then click Generate. Each tile shows a 3&times;3 bitmask grid &mdash; <span style="color:#d62828">red</span> cells are connected neighbors, white cells are not. The center cell is always the tile itself.</p>
+  <p><strong>Variations:</strong> The global default sets how many slots each tile gets (1 = base tile only, no extras). Override specific categories to give them more or fewer slots. For example, center tiles and straight edges often benefit from extra variations to avoid visual repetition in large filled areas. Leave an override blank to use the global default.</p>
+  <p><strong>Layout:</strong> Multi-tile variation groups are packed first into rows targeting a square-ish shape. Single-tile groups (no variations) then fill the remaining gaps at the end of rows. This produces a tight, near-rectangular layout. Categories stay grouped in order: other &rarr; outer corners &rarr; straight edges &rarr; inner corners &rarr; center.</p>
+  <p><strong>Workflow:</strong> Download the PNG template, open it in your art program, and paint your tile art over each bitmask indicator. Colored borders mark variation groups.</p>
+</div>
+
+<script>
+// --- Bitmask constants ---
+const NW = 1, N = 2, NE = 4, W = 8, E = 16, SW = 32, S = 64, SE = 128;
+
+// --- Canonicalize: mask out corners where both adjacent edges aren't set ---
+function canonicalize(mask) {
+  let m = mask;
+  if (!(m & N) || !(m & W)) m &= ~NW;
+  if (!(m & N) || !(m & E)) m &= ~NE;
+  if (!(m & S) || !(m & W)) m &= ~SW;
+  if (!(m & S) || !(m & E)) m &= ~SE;
+  return m;
+}
+
+// --- Categorize a canonical tile ---
+function categorize(mask) {
+  const edges = ((mask & N) ? 1 : 0) + ((mask & E) ? 1 : 0) +
+                ((mask & S) ? 1 : 0) + ((mask & W) ? 1 : 0);
+  if (edges === 4) return mask === 255 ? 'center' : 'inner_corner';
+  if (edges === 3) return 'straight_edge';
+  if (edges === 2) {
+    if ((mask & N && mask & S) || (mask & E && mask & W)) return 'other';
+    return 'outer_corner';
+  }
+  return 'other';
+}
+
+// --- All 47 tile groups in semantic order ---
+// Each entry: { cat, mask }
+// Ordered: other → outer_corner → straight_edge → inner_corner → center
+const TILE_GROUPS = [
+  // Other: isolated
+  { cat: 'other', mask: 0 },
+  // Other: dead ends (N, W, E, S)
+  { cat: 'other', mask: 2 },
+  { cat: 'other', mask: 8 },
+  { cat: 'other', mask: 16 },
+  { cat: 'other', mask: 64 },
+  // Other: corridors (EW, NS)
+  { cat: 'other', mask: 24 },
+  { cat: 'other', mask: 66 },
+  // Outer corners: L-shapes without/with corner bit
+  { cat: 'outer_corner', mask: 10 },
+  { cat: 'outer_corner', mask: 11 },
+  { cat: 'outer_corner', mask: 18 },
+  { cat: 'outer_corner', mask: 22 },
+  { cat: 'outer_corner', mask: 72 },
+  { cat: 'outer_corner', mask: 104 },
+  { cat: 'outer_corner', mask: 80 },
+  { cat: 'outer_corner', mask: 208 },
+  // Straight edges (T-junctions by missing side)
+  // Missing S
+  { cat: 'straight_edge', mask: 26 },
+  { cat: 'straight_edge', mask: 27 },
+  { cat: 'straight_edge', mask: 30 },
+  { cat: 'straight_edge', mask: 31 },
+  // Missing E
+  { cat: 'straight_edge', mask: 74 },
+  { cat: 'straight_edge', mask: 75 },
+  { cat: 'straight_edge', mask: 106 },
+  { cat: 'straight_edge', mask: 107 },
+  // Missing W
+  { cat: 'straight_edge', mask: 82 },
+  { cat: 'straight_edge', mask: 86 },
+  { cat: 'straight_edge', mask: 210 },
+  { cat: 'straight_edge', mask: 214 },
+  // Missing N
+  { cat: 'straight_edge', mask: 88 },
+  { cat: 'straight_edge', mask: 120 },
+  { cat: 'straight_edge', mask: 216 },
+  { cat: 'straight_edge', mask: 248 },
+  // Inner corners (4 edges, varying corner presence)
+  // 0 corners
+  { cat: 'inner_corner', mask: 90 },
+  // 1 corner
+  { cat: 'inner_corner', mask: 91 },
+  { cat: 'inner_corner', mask: 94 },
+  { cat: 'inner_corner', mask: 122 },
+  { cat: 'inner_corner', mask: 218 },
+  // 2 corners
+  { cat: 'inner_corner', mask: 95 },
+  { cat: 'inner_corner', mask: 123 },
+  { cat: 'inner_corner', mask: 219 },
+  { cat: 'inner_corner', mask: 126 },
+  { cat: 'inner_corner', mask: 222 },
+  { cat: 'inner_corner', mask: 250 },
+  // 3 corners
+  { cat: 'inner_corner', mask: 127 },
+  { cat: 'inner_corner', mask: 223 },
+  { cat: 'inner_corner', mask: 251 },
+  { cat: 'inner_corner', mask: 254 },
+  // Center (fully connected)
+  { cat: 'center', mask: 255 },
+];
+
+// --- Border colors for variation groups (cycling palette) ---
+const GROUP_COLORS = [
+  '#e94560', '#00b4d8', '#06d6a0', '#ffd166',
+  '#a855f7', '#f97316', '#22d3ee', '#fb7185',
+];
+
+// --- Read config from UI ---
+function readConfig() {
+  const tw = Math.max(8, parseInt(document.getElementById('tileW').value) || 32);
+  const th = Math.max(8, parseInt(document.getElementById('tileH').value) || 32);
+  const vGlobal = Math.max(1, parseInt(document.getElementById('varGlobal').value) || 1);
+
+  const parse = (id) => {
+    const v = document.getElementById(id).value;
+    return v === '' ? null : Math.max(1, parseInt(v) || 1);
+  };
+
+  return {
+    tw, th,
+    variations: {
+      other: vGlobal,
+      center: parse('varCenter') ?? vGlobal,
+      straight_edge: parse('varEdge') ?? vGlobal,
+      inner_corner: parse('varInner') ?? vGlobal,
+      outer_corner: parse('varOuter') ?? vGlobal,
+    }
+  };
+}
+
+// --- Two-pass packing: variation groups first, then fill gaps with singles ---
+function twoPhasePack(variations, targetW) {
+  // Separate into multi-tile groups (have variations) and single-tile groups
+  const multiGroups = [];
+  const singleGroups = [];
+  for (const group of TILE_GROUPS) {
+    if (variations[group.cat] > 1) {
+      multiGroups.push(group);
+    } else {
+      singleGroups.push(group);
+    }
+  }
+
+  // Pass 1: Pack multi-tile groups greedily into rows
+  const rows = []; // each row: { groups: [], width: number }
+  let currentRow = [];
+  let currentRowW = 0;
+
+  for (const group of multiGroups) {
+    const groupW = variations[group.cat];
+    if (currentRowW + groupW > targetW && currentRow.length > 0) {
+      rows.push({ groups: currentRow, width: currentRowW });
+      currentRow = [];
+      currentRowW = 0;
+    }
+    currentRow.push(group);
+    currentRowW += groupW;
+  }
+  if (currentRow.length > 0) {
+    rows.push({ groups: currentRow, width: currentRowW });
+  }
+
+  // Pass 2: Fill remaining gaps in each row with single-tile groups
+  const remaining = [...singleGroups];
+  for (const row of rows) {
+    while (remaining.length > 0 && row.width + 1 <= targetW) {
+      row.groups.push(remaining.shift());
+      row.width += 1;
+    }
+  }
+
+  // Any leftover singles get their own rows
+  while (remaining.length > 0) {
+    const row = { groups: [], width: 0 };
+    while (remaining.length > 0 && row.width + 1 <= targetW) {
+      row.groups.push(remaining.shift());
+      row.width += 1;
+    }
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+// --- Find optimal target width that produces the squarest layout ---
+function findOptimalWidth(variations) {
+  // Total tile slots needed
+  const counts = { other: 7, outer_corner: 8, straight_edge: 16, inner_corner: 15, center: 1 };
+  let totalSlots = 0;
+  for (const cat in counts) {
+    totalSlots += counts[cat] * variations[cat];
+  }
+
+  // Minimum width = largest single group (must fit at least one)
+  const minW = Math.max(...Object.values(variations));
+  // Search up to 2x the square root
+  const idealW = Math.ceil(Math.sqrt(totalSlots));
+  const maxW = Math.min(totalSlots, idealW * 2);
+
+  let bestW = minW;
+  let bestScore = Infinity;
+
+  for (let w = minW; w <= maxW; w++) {
+    const rows = twoPhasePack(variations, w);
+    const h = rows.length;
+    const waste = w * h - totalSlots;
+    // Primary: aspect ratio close to 1:1. Secondary: minimal waste.
+    const ratio = w > h ? w / h : h / w;
+    const score = ratio * 1000 + waste;
+
+    if (score < bestScore) {
+      bestW = w;
+      bestScore = score;
+    }
+  }
+
+  return bestW;
+}
+
+// --- Compute layout positions using optimal packing ---
+function computeLayout(config) {
+  const { tw, th, variations } = config;
+  const targetW = findOptimalWidth(variations);
+  const packedRows = twoPhasePack(variations, targetW);
+
+  const positions = []; // { mask, x, y } for each tile slot
+  const groupBorders = [];    // { x, y, w, h, color } for each variation group border
+  const imageW = targetW * tw;
+  let colorIdx = 0;
+
+  for (let r = 0; r < packedRows.length; r++) {
+    const row = packedRows[r];
+    let x = 0;
+    const y = r * th;
+
+    for (const group of row.groups) {
+      const vars = variations[group.cat];
+      const groupPxW = vars * tw;
+      const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
+      colorIdx++;
+
+      // Group border (always draw — helps identify groups even with 1 variation)
+      if (vars > 1) {
+        groupBorders.push({ x, y, w: groupPxW, h: th, color });
+      }
+
+      // Place each slot (base + variations)
+      for (let v = 0; v < vars; v++) {
+        positions.push({ mask: group.mask, x: x + v * tw, y });
+      }
+
+      x += groupPxW;
+    }
+  }
+
+  return {
+    positions,
+    groups: groupBorders,
+    width: imageW,
+    height: packedRows.length * th,
+    targetW,
+    rowCount: packedRows.length,
+  };
+}
+
+// --- Draw the 3x3 bitmask indicator ---
+function drawBitmask(ctx, mask, tx, ty, tw, th) {
+  // Map bitmask bits to 3x3 grid positions
+  // Grid: [NW, N, NE] [W, C, E] [SW, S, SE]
+  const grid = [
+    [NW, N, NE],
+    [W, -1, E],   // -1 = center (always on)
+    [SW, S, SE]
+  ];
+
+  const cellW = Math.max(2, Math.floor(tw * 0.22));
+  const cellH = Math.max(2, Math.floor(th * 0.22));
+  const gap = Math.max(1, Math.floor(Math.min(tw, th) * 0.04));
+  const totalW = cellW * 3 + gap * 2;
+  const totalH = cellH * 3 + gap * 2;
+  const ox = tx + Math.floor((tw - totalW) / 2);
+  const oy = ty + Math.floor((th - totalH) / 2);
+
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const bit = grid[r][c];
+      const isOn = bit === -1 || (mask & bit) !== 0;
+      const cx = ox + c * (cellW + gap);
+      const cy = oy + r * (cellH + gap);
+
+      ctx.fillStyle = isOn ? '#d62828' : '#ffffff';
+      ctx.fillRect(cx, cy, cellW, cellH);
+    }
+  }
+}
+
+// --- Render the full template ---
+function render() {
+  const config = readConfig();
+  const layout = computeLayout(config);
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = layout.width;
+  canvas.height = layout.height;
+
+  // Checkerboard background
+  const { tw, th } = config;
+  const cols = Math.ceil(layout.width / tw);
+  const rows = Math.ceil(layout.height / th);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#a0a0a0' : '#888888';
+      ctx.fillRect(c * tw, r * th, tw, th);
+    }
+  }
+
+  // Draw bitmask indicators in each tile slot
+  for (const pos of layout.positions) {
+    drawBitmask(ctx, pos.mask, pos.x, pos.y, tw, th);
+  }
+
+  // Draw variation group borders
+  for (const g of layout.groups) {
+    ctx.strokeStyle = g.color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(g.x + 0.5, g.y + 0.5, g.w - 1, g.h - 1);
+  }
+
+  // Scale preview for visibility
+  const maxPreviewW = window.innerWidth * 0.9;
+  const scale = layout.width > maxPreviewW ? maxPreviewW / layout.width : Math.min(4, Math.floor(512 / layout.width) || 1);
+  canvas.style.width = Math.floor(layout.width * scale) + 'px';
+  canvas.style.height = Math.floor(layout.height * scale) + 'px';
+}
+
+// --- Download ---
+function download() {
+  const canvas = document.getElementById('canvas');
+  const link = document.createElement('a');
+  link.download = 'blob_tileset_template.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// --- Event listeners ---
+document.getElementById('generate').addEventListener('click', render);
+document.getElementById('download').addEventListener('click', download);
+
+// Auto-generate on load
+render();
+</script>
+
+</body>
+</html>
