@@ -1,6 +1,4 @@
-ref: https://www.boristhebrave.com/permanent/24/06/cr31/stagecast/wang/blob.html
-
-![alt text](image.png)
+reference: https://www.boristhebrave.com/permanent/24/06/cr31/stagecast/wang/blob.html
 
 # Blob Tileset Template Generator
 
