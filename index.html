@@ -56,6 +56,19 @@
     padding-top: 8px;
     margin-top: 4px;
   }
+  .checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .checkbox-group label {
+    font-size: 0.85em;
+    color: #ccc;
+    cursor: pointer;
+  }
+  .checkbox-group input[type="checkbox"] {
+    cursor: pointer;
+  }
   #preview-container {
     background: #252525;
     padding: 16px;
@@ -136,6 +149,11 @@
   <div class="control-group">
     <label>Corridors</label>
     <input type="number" id="varCorridor" value="" min="1" max="32" placeholder="—">
+  </div>
+
+  <div class="checkbox-group">
+    <input type="checkbox" id="stackRight" checked>
+    <label for="stackRight">Stack variations on the right</label>
   </div>
 
   <div class="section-label"></div>
@@ -300,8 +318,10 @@ function readConfig() {
     return v === '' ? null : Math.max(1, parseInt(v) || 1);
   };
 
+  const stackRight = document.getElementById('stackRight').checked;
+
   return {
-    tw, th,
+    tw, th, stackRight,
     variations: {
       other: vGlobal,
       center: parse('varCenter') ?? vGlobal,
@@ -311,6 +331,26 @@ function readConfig() {
       corridor: parse('varCorridor') ?? vGlobal,
     }
   };
+}
+
+// --- Inline packing: variations packed multiple per row ---
+function inlinePack(variations, targetW) {
+  const rows = [];
+  let currentRow = { items: [], width: 0 };
+
+  for (const group of TILE_GROUPS) {
+    const vars = variations[group.cat];
+    // If this group won't fit on the current row, start a new one
+    if (currentRow.width + vars > targetW && currentRow.width > 0) {
+      rows.push(currentRow);
+      currentRow = { items: [], width: 0 };
+    }
+    currentRow.items.push({ group, count: vars });
+    currentRow.width += vars;
+  }
+  if (currentRow.items.length > 0) rows.push(currentRow);
+
+  return rows;
 }
 
 // --- Packing: each variation group gets its own row (right-aligned), singles fill left ---
@@ -356,7 +396,7 @@ function twoPhasePack(variations, targetW) {
 }
 
 // --- Find optimal target width that produces the squarest layout ---
-function findOptimalWidth(variations) {
+function findOptimalWidth(variations, stackRight) {
   // Total tile slots needed
   const counts = { other: 17, outer_corner: 8, straight_edge: 4, inner_corner: 15, center: 1, corridor: 2 };
   let totalSlots = 0;
@@ -370,11 +410,13 @@ function findOptimalWidth(variations) {
   const idealW = Math.ceil(Math.sqrt(totalSlots));
   const maxW = Math.min(totalSlots, idealW * 2);
 
+  const packFn = stackRight ? twoPhasePack : inlinePack;
+
   let bestW = minW;
   let bestScore = Infinity;
 
   for (let w = minW; w <= maxW; w++) {
-    const rows = twoPhasePack(variations, w);
+    const rows = packFn(variations, w);
     const h = rows.length;
     const waste = w * h - totalSlots;
     // Primary: aspect ratio close to 1:1. Secondary: minimal waste.
@@ -392,45 +434,68 @@ function findOptimalWidth(variations) {
 
 // --- Compute layout positions using optimal packing ---
 function computeLayout(config) {
-  const { tw, th, variations } = config;
-  const targetW = findOptimalWidth(variations);
-  const packedRows = twoPhasePack(variations, targetW);
-
-  const positions = []; // { mask, x, y, color } for each tile slot
+  const { tw, th, variations, stackRight } = config;
+  const targetW = findOptimalWidth(variations, stackRight);
   const imageW = targetW * tw;
+  const positions = []; // { mask, x, y, color } for each tile slot
   let colorIdx = 0;
 
-  for (let r = 0; r < packedRows.length; r++) {
-    const row = packedRows[r];
-    const y = r * th;
+  if (stackRight) {
+    const packedRows = twoPhasePack(variations, targetW);
 
-    // Place singles on the left
-    let x = 0;
-    for (const group of row.singles) {
-      positions.push({ mask: group.mask, x, y, color: null });
-      colorIdx++;
-      x += tw;
-    }
+    for (let r = 0; r < packedRows.length; r++) {
+      const row = packedRows[r];
+      const y = r * th;
 
-    // Place multi-variation group flush right
-    if (row.multi) {
-      const vars = variations[row.multi.cat];
-      const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
-      colorIdx++;
-      const groupX = (targetW - vars) * tw;
-      for (let v = 0; v < vars; v++) {
-        positions.push({ mask: row.multi.mask, x: groupX + v * tw, y, color });
+      // Place singles on the left
+      let x = 0;
+      for (const group of row.singles) {
+        positions.push({ mask: group.mask, x, y, color: null });
+        colorIdx++;
+        x += tw;
+      }
+
+      // Place multi-variation group flush right
+      if (row.multi) {
+        const vars = variations[row.multi.cat];
+        const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
+        colorIdx++;
+        const groupX = (targetW - vars) * tw;
+        for (let v = 0; v < vars; v++) {
+          positions.push({ mask: row.multi.mask, x: groupX + v * tw, y, color });
+        }
       }
     }
-  }
 
-  return {
-    positions,
-    width: imageW,
-    height: packedRows.length * th,
-    targetW,
-    rowCount: packedRows.length,
-  };
+    return {
+      positions, width: imageW, height: packedRows.length * th,
+      targetW, rowCount: packedRows.length,
+    };
+  } else {
+    const packedRows = inlinePack(variations, targetW);
+
+    for (let r = 0; r < packedRows.length; r++) {
+      const row = packedRows[r];
+      const y = r * th;
+      let x = 0;
+
+      for (const item of row.items) {
+        const color = item.count > 1
+          ? GROUP_COLORS[colorIdx % GROUP_COLORS.length]
+          : null;
+        colorIdx++;
+        for (let v = 0; v < item.count; v++) {
+          positions.push({ mask: item.group.mask, x, y, color });
+          x += tw;
+        }
+      }
+    }
+
+    return {
+      positions, width: imageW, height: packedRows.length * th,
+      targetW, rowCount: packedRows.length,
+    };
+  }
 }
 
 // --- Draw the 3x3 bitmask indicator ---
@@ -509,11 +574,42 @@ function download() {
   link.click();
 }
 
+// --- LocalStorage persistence ---
+const STORAGE_KEY = 'blobTilesetSettings';
+const SETTING_IDS = ['tileW', 'tileH', 'varGlobal', 'varCenter', 'varEdge', 'varInner', 'varOuter', 'varCorridor', 'stackRight'];
+
+function saveSettings() {
+  const settings = {};
+  for (const id of SETTING_IDS) {
+    const el = document.getElementById(id);
+    settings[id] = el.type === 'checkbox' ? el.checked : el.value;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+}
+
+function loadSettings() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const settings = JSON.parse(raw);
+    for (const id of SETTING_IDS) {
+      if (!(id in settings)) continue;
+      const el = document.getElementById(id);
+      if (el.type === 'checkbox') {
+        el.checked = settings[id];
+      } else {
+        el.value = settings[id];
+      }
+    }
+  } catch (e) { /* ignore corrupt data */ }
+}
+
 // --- Event listeners ---
-document.getElementById('generate').addEventListener('click', render);
+document.getElementById('generate').addEventListener('click', () => { saveSettings(); render(); });
 document.getElementById('download').addEventListener('click', download);
 
 // Auto-generate on load
+loadSettings();
 render();
 </script>
 
