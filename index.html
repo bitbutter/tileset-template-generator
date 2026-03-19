@@ -333,22 +333,55 @@ function readConfig() {
   };
 }
 
-// --- Inline packing: variations packed multiple per row ---
-function inlinePack(variations, targetW) {
-  const rows = [];
-  let currentRow = { items: [], width: 0 };
-
+// --- Compact packing: multi-variation groups first, singles fill gaps ---
+function compactPack(variations, targetW) {
+  const multiGroups = [];
+  const singleGroups = [];
   for (const group of TILE_GROUPS) {
-    const vars = variations[group.cat];
-    // If this group won't fit on the current row, start a new one
-    if (currentRow.width + vars > targetW && currentRow.width > 0) {
-      rows.push(currentRow);
-      currentRow = { items: [], width: 0 };
+    if (variations[group.cat] > 1) {
+      multiGroups.push(group);
+    } else {
+      singleGroups.push(group);
     }
-    currentRow.items.push({ group, count: vars });
-    currentRow.width += vars;
   }
-  if (currentRow.items.length > 0) rows.push(currentRow);
+
+  // Pack multi-variation groups into rows (multiple groups can share a row)
+  const rows = []; // each row: { items: [{group, count}], width }
+  for (const group of multiGroups) {
+    const vars = variations[group.cat];
+    // Find first row with enough space, or create a new one
+    let placed = false;
+    for (const row of rows) {
+      if (row.width + vars <= targetW) {
+        row.items.push({ group, count: vars });
+        row.width += vars;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      rows.push({ items: [{ group, count: vars }], width: vars });
+    }
+  }
+
+  // Fill gaps in existing rows with singles
+  const remaining = [...singleGroups];
+  for (const row of rows) {
+    while (remaining.length > 0 && row.width < targetW) {
+      row.items.push({ group: remaining.shift(), count: 1 });
+      row.width += 1;
+    }
+  }
+
+  // Leftover singles get their own rows
+  while (remaining.length > 0) {
+    const row = { items: [], width: 0 };
+    while (remaining.length > 0 && row.width < targetW) {
+      row.items.push({ group: remaining.shift(), count: 1 });
+      row.width += 1;
+    }
+    rows.push(row);
+  }
 
   return rows;
 }
@@ -410,7 +443,7 @@ function findOptimalWidth(variations, stackRight) {
   const idealW = Math.ceil(Math.sqrt(totalSlots));
   const maxW = Math.min(totalSlots, idealW * 2);
 
-  const packFn = stackRight ? twoPhasePack : inlinePack;
+  const packFn = stackRight ? twoPhasePack : compactPack;
 
   let bestW = minW;
   let bestScore = Infinity;
@@ -472,7 +505,7 @@ function computeLayout(config) {
       targetW, rowCount: packedRows.length,
     };
   } else {
-    const packedRows = inlinePack(variations, targetW);
+    const packedRows = compactPack(variations, targetW);
 
     for (let r = 0; r < packedRows.length; r++) {
       const row = packedRows[r];
