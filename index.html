@@ -146,10 +146,11 @@
 <button id="download">Download PNG</button>
 
 <div class="info">
-  <p><strong>How to use:</strong> Set your tile dimensions and variation counts, then click Generate. Each tile shows a 3&times;3 bitmask grid &mdash; <span style="color:#d62828">red</span> cells are connected neighbors, white cells are not. The center cell is always the tile itself.</p>
+  <p><strong>What is this?</strong> A blob tileset uses 47 unique tiles to auto-tile terrain. Each tile handles a specific combination of filled/empty neighbors so edges, corners, and transitions all connect seamlessly.</p>
+  <p><strong>Reading the template:</strong> The checkerboard background marks tile boundaries &mdash; adjacent tiles alternate between two shades of gray so you can see where each tile slot begins and ends. Inside each slot, a 3&times;3 bitmask indicator shows which neighbors are present: the center cell (always <span style="color:#d62828">red</span>) is the tile&rsquo;s own position, the 8 surrounding cells represent the 8 adjacent directions. <span style="color:#d62828">Red</span> = neighbor present (connected), white = neighbor absent (empty).</p>
   <p><strong>Variations:</strong> The global default sets how many slots each tile gets (1 = base tile only, no extras). Override specific categories to give them more or fewer slots. For example, center tiles and straight edges often benefit from extra variations to avoid visual repetition in large filled areas. Leave an override blank to use the global default.</p>
-  <p><strong>Layout:</strong> Multi-tile variation groups are packed first into rows targeting a square-ish shape. Single-tile groups (no variations) then fill the remaining gaps at the end of rows. This produces a tight, near-rectangular layout. Categories stay grouped in order: other &rarr; outer corners &rarr; straight edges &rarr; inner corners &rarr; center.</p>
-  <p><strong>Workflow:</strong> Download the PNG template, open it in your art program, and paint your tile art over each bitmask indicator. Colored borders mark variation groups.</p>
+  <p><strong>Layout:</strong> Multi-variation groups are packed into rows targeting a square-ish aspect ratio, with colored borders marking each group. Single-variation tiles fill remaining gaps at row ends. Categories appear in order: other (isolated, dead-ends, corridors) &rarr; outer corners &rarr; straight edges &rarr; inner corners &rarr; center (fully surrounded).</p>
+  <p><strong>Workflow:</strong> Download the PNG template, open it in your art program, and paint your tile art over each bitmask indicator. The checkerboard and indicators will be covered by your art &mdash; they&rsquo;re just guides.</p>
 </div>
 
 <script>
