@@ -132,6 +132,10 @@
     <label>Outer Corners</label>
     <input type="number" id="varOuter" value="" min="1" max="32" placeholder="—">
   </div>
+  <div class="control-group">
+    <label>Corridors</label>
+    <input type="number" id="varCorridor" value="" min="1" max="32" placeholder="—">
+  </div>
 
   <div class="section-label"></div>
   <div class="control-group">
@@ -172,9 +176,19 @@ function categorize(mask) {
   const edges = ((mask & N) ? 1 : 0) + ((mask & E) ? 1 : 0) +
                 ((mask & S) ? 1 : 0) + ((mask & W) ? 1 : 0);
   if (edges === 4) return mask === 255 ? 'center' : 'inner_corner';
-  if (edges === 3) return 'straight_edge';
+  if (edges === 3) {
+    // Only classify as straight_edge if all available corners are filled.
+    // These 4 tiles are the common ones along long walls. The other 12
+    // (with missing corners) are rarer transition pieces → 'other'.
+    const hasAllCorners =
+      (!(mask & N) && (mask & (SW | SE)) === (SW | SE)) ||
+      (!(mask & S) && (mask & (NW | NE)) === (NW | NE)) ||
+      (!(mask & W) && (mask & (NE | SE)) === (NE | SE)) ||
+      (!(mask & E) && (mask & (NW | SW)) === (NW | SW));
+    return hasAllCorners ? 'straight_edge' : 'other';
+  }
   if (edges === 2) {
-    if ((mask & N && mask & S) || (mask & E && mask & W)) return 'other';
+    if ((mask & N && mask & S) || (mask & E && mask & W)) return 'corridor';
     return 'outer_corner';
   }
   return 'other';
@@ -191,9 +205,9 @@ const TILE_GROUPS = [
   { cat: 'other', mask: 8 },
   { cat: 'other', mask: 16 },
   { cat: 'other', mask: 64 },
-  // Other: corridors (EW, NS)
-  { cat: 'other', mask: 24 },
-  { cat: 'other', mask: 66 },
+  // Corridors (single-cell-wide: EW, NS)
+  { cat: 'corridor', mask: 24 },
+  { cat: 'corridor', mask: 66 },
   // Outer corners: L-shapes without/with corner bit
   { cat: 'outer_corner', mask: 10 },
   { cat: 'outer_corner', mask: 11 },
@@ -203,27 +217,28 @@ const TILE_GROUPS = [
   { cat: 'outer_corner', mask: 104 },
   { cat: 'outer_corner', mask: 80 },
   { cat: 'outer_corner', mask: 208 },
-  // Straight edges (T-junctions by missing side)
+  // Straight edges: only fully-cornered (common along long walls)
+  { cat: 'straight_edge', mask: 31 },  // Missing S, corners NW+NE
+  { cat: 'straight_edge', mask: 107 }, // Missing E, corners NW+SW
+  { cat: 'straight_edge', mask: 214 }, // Missing W, corners NE+SE
+  { cat: 'straight_edge', mask: 248 }, // Missing N, corners SW+SE
+  // Partial straight edges (missing some corners — rarer transitions)
   // Missing S
-  { cat: 'straight_edge', mask: 26 },
-  { cat: 'straight_edge', mask: 27 },
-  { cat: 'straight_edge', mask: 30 },
-  { cat: 'straight_edge', mask: 31 },
+  { cat: 'other', mask: 26 },
+  { cat: 'other', mask: 27 },
+  { cat: 'other', mask: 30 },
   // Missing E
-  { cat: 'straight_edge', mask: 74 },
-  { cat: 'straight_edge', mask: 75 },
-  { cat: 'straight_edge', mask: 106 },
-  { cat: 'straight_edge', mask: 107 },
+  { cat: 'other', mask: 74 },
+  { cat: 'other', mask: 75 },
+  { cat: 'other', mask: 106 },
   // Missing W
-  { cat: 'straight_edge', mask: 82 },
-  { cat: 'straight_edge', mask: 86 },
-  { cat: 'straight_edge', mask: 210 },
-  { cat: 'straight_edge', mask: 214 },
+  { cat: 'other', mask: 82 },
+  { cat: 'other', mask: 86 },
+  { cat: 'other', mask: 210 },
   // Missing N
-  { cat: 'straight_edge', mask: 88 },
-  { cat: 'straight_edge', mask: 120 },
-  { cat: 'straight_edge', mask: 216 },
-  { cat: 'straight_edge', mask: 248 },
+  { cat: 'other', mask: 88 },
+  { cat: 'other', mask: 120 },
+  { cat: 'other', mask: 216 },
   // Inner corners (4 edges, varying corner presence)
   // 0 corners
   { cat: 'inner_corner', mask: 90 },
@@ -249,15 +264,28 @@ const TILE_GROUPS = [
 ];
 
 // --- Group colors: each entry is [bright, dark] for checkerboard ---
+// Subtle contrast between bright/dark (~12% difference), many distinct hues
 const GROUP_COLORS = [
-  ['#e9a0a0', '#c06060'],
-  ['#80d0e8', '#4098b0'],
-  ['#80e8c0', '#40a880'],
-  ['#f0d880', '#b8a048'],
-  ['#c8a0f0', '#9068b8'],
-  ['#f0b080', '#b87848'],
-  ['#80e0f0', '#48a8b8'],
-  ['#f0a0b0', '#b86878'],
+  ['#d4a0a0', '#c08888'], // rose
+  ['#a0c8d4', '#88b0c0'], // sky blue
+  ['#a0d4b0', '#88c098'], // mint
+  ['#d4cca0', '#c0b888'], // sand
+  ['#b8a0d4', '#a488c0'], // lavender
+  ['#d4b8a0', '#c0a488'], // peach
+  ['#a0d4d0', '#88c0b8'], // teal
+  ['#d4a0c0', '#c088a8'], // pink
+  ['#a8d4a0', '#90c088'], // leaf
+  ['#c8a0d4', '#b088c0'], // violet
+  ['#d4c0a0', '#c0a888'], // wheat
+  ['#a0b8d4', '#88a4c0'], // steel blue
+  ['#d4a0a8', '#c08890'], // salmon
+  ['#a0d4c0', '#88c0a8'], // seafoam
+  ['#c0d4a0', '#a8c088'], // lime
+  ['#d0a0d4', '#b888c0'], // orchid
+  ['#a0c0d4', '#88a8c0'], // ice blue
+  ['#d4b0a0', '#c09888'], // clay
+  ['#b0d4a0', '#98c088'], // spring
+  ['#d4a0d0', '#c088b8'], // magenta
 ];
 
 // --- Read config from UI ---
@@ -279,6 +307,7 @@ function readConfig() {
       straight_edge: parse('varEdge') ?? vGlobal,
       inner_corner: parse('varInner') ?? vGlobal,
       outer_corner: parse('varOuter') ?? vGlobal,
+      corridor: parse('varCorridor') ?? vGlobal,
     }
   };
 }
@@ -340,7 +369,7 @@ function twoPhasePack(variations, targetW) {
 // --- Find optimal target width that produces the squarest layout ---
 function findOptimalWidth(variations) {
   // Total tile slots needed
-  const counts = { other: 7, outer_corner: 8, straight_edge: 16, inner_corner: 15, center: 1 };
+  const counts = { other: 17, outer_corner: 8, straight_edge: 4, inner_corner: 15, center: 1, corridor: 2 };
   let totalSlots = 0;
   for (const cat in counts) {
     totalSlots += counts[cat] * variations[cat];
