@@ -147,9 +147,9 @@
 
 <div class="info">
   <p><strong>What is this?</strong> A blob tileset uses 47 unique tiles to auto-tile terrain. Each tile handles a specific combination of filled/empty neighbors so edges, corners, and transitions all connect seamlessly.</p>
-  <p><strong>Reading the template:</strong> The checkerboard background marks tile boundaries &mdash; adjacent tiles alternate between two shades of gray so you can see where each tile slot begins and ends. Inside each slot, a 3&times;3 bitmask indicator shows which neighbors are present: the center cell (always <span style="color:#d62828">red</span>) is the tile&rsquo;s own position, the 8 surrounding cells represent the 8 adjacent directions. <span style="color:#d62828">Red</span> = neighbor present (connected), white = neighbor absent (empty).</p>
+  <p><strong>Reading the template:</strong> The checkerboard background marks tile boundaries &mdash; adjacent tiles alternate between two shades of gray so you can see where each tile slot begins and ends. Inside each slot, a 3&times;3 bitmask indicator shows which neighbors are present: the center cell (always <span style="color:#d62828">red</span>) is the tile&rsquo;s own position, the 8 surrounding cells represent the 8 adjacent directions. <span style="color:#d62828">Red</span> = a tile of the same terrain type (e.g. another wall tile, another grass tile) exists in that direction, white = no matching tile there (edge, corner, or open space). So a tile with only the top three cells red is a bottom edge piece &mdash; it has matching terrain above but nothing below.</p>
   <p><strong>Variations:</strong> The global default sets how many slots each tile gets (1 = base tile only, no extras). Override specific categories to give them more or fewer slots. For example, center tiles and straight edges often benefit from extra variations to avoid visual repetition in large filled areas. Leave an override blank to use the global default.</p>
-  <p><strong>Layout:</strong> Multi-variation groups are packed into rows targeting a square-ish aspect ratio, with colored borders marking each group. Single-variation tiles fill remaining gaps at row ends. Categories appear in order: other (isolated, dead-ends, corridors) &rarr; outer corners &rarr; straight edges &rarr; inner corners &rarr; center (fully surrounded).</p>
+  <p><strong>Layout:</strong> Multi-variation groups are packed into rows targeting a square-ish aspect ratio, with colored checkerboard patterns distinguishing each group. Single-variation tiles fill remaining gaps at row ends. Categories appear in order: other (isolated, dead-ends, corridors) &rarr; outer corners &rarr; straight edges &rarr; inner corners &rarr; center (fully surrounded).</p>
   <p><strong>Workflow:</strong> Download the PNG template, open it in your art program, and paint your tile art over each bitmask indicator. The checkerboard and indicators will be covered by your art &mdash; they&rsquo;re just guides.</p>
 </div>
 
@@ -248,10 +248,16 @@ const TILE_GROUPS = [
   { cat: 'center', mask: 255 },
 ];
 
-// --- Border colors for variation groups (cycling palette) ---
+// --- Group colors: each entry is [bright, dark] for checkerboard ---
 const GROUP_COLORS = [
-  '#e94560', '#00b4d8', '#06d6a0', '#ffd166',
-  '#a855f7', '#f97316', '#22d3ee', '#fb7185',
+  ['#e9a0a0', '#c06060'],
+  ['#80d0e8', '#4098b0'],
+  ['#80e8c0', '#40a880'],
+  ['#f0d880', '#b8a048'],
+  ['#c8a0f0', '#9068b8'],
+  ['#f0b080', '#b87848'],
+  ['#80e0f0', '#48a8b8'],
+  ['#f0a0b0', '#b86878'],
 ];
 
 // --- Read config from UI ---
@@ -372,8 +378,7 @@ function computeLayout(config) {
   const targetW = findOptimalWidth(variations);
   const packedRows = twoPhasePack(variations, targetW);
 
-  const positions = []; // { mask, x, y } for each tile slot
-  const groupBorders = [];    // { x, y, w, h, color } for each variation group border
+  const positions = []; // { mask, x, y, color } for each tile slot
   const imageW = targetW * tw;
   let colorIdx = 0;
 
@@ -384,27 +389,20 @@ function computeLayout(config) {
 
     for (const group of row.groups) {
       const vars = variations[group.cat];
-      const groupPxW = vars * tw;
-      const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
+      const color = vars > 1 ? GROUP_COLORS[colorIdx % GROUP_COLORS.length] : null;
       colorIdx++;
-
-      // Group border (always draw — helps identify groups even with 1 variation)
-      if (vars > 1) {
-        groupBorders.push({ x, y, w: groupPxW, h: th, color });
-      }
 
       // Place each slot (base + variations)
       for (let v = 0; v < vars; v++) {
-        positions.push({ mask: group.mask, x: x + v * tw, y });
+        positions.push({ mask: group.mask, x: x + v * tw, y, color });
       }
 
-      x += groupPxW;
+      x += vars * tw;
     }
   }
 
   return {
     positions,
-    groups: groupBorders,
     width: imageW,
     height: packedRows.length * th,
     targetW,
@@ -453,27 +451,23 @@ function render() {
   canvas.width = layout.width;
   canvas.height = layout.height;
 
-  // Checkerboard background
+  // Draw checkerboard background per tile (colored for multi-variation groups, gray for singles)
   const { tw, th } = config;
-  const cols = Math.ceil(layout.width / tw);
-  const rows = Math.ceil(layout.height / th);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      ctx.fillStyle = (r + c) % 2 === 0 ? '#a0a0a0' : '#888888';
-      ctx.fillRect(c * tw, r * th, tw, th);
+  for (const pos of layout.positions) {
+    const col = Math.round(pos.x / tw);
+    const row = Math.round(pos.y / th);
+    const even = (row + col) % 2 === 0;
+    if (pos.color) {
+      ctx.fillStyle = even ? pos.color[0] : pos.color[1];
+    } else {
+      ctx.fillStyle = even ? '#a0a0a0' : '#888888';
     }
+    ctx.fillRect(pos.x, pos.y, tw, th);
   }
 
   // Draw bitmask indicators in each tile slot
   for (const pos of layout.positions) {
     drawBitmask(ctx, pos.mask, pos.x, pos.y, tw, th);
-  }
-
-  // Draw variation group borders
-  for (const g of layout.groups) {
-    ctx.strokeStyle = g.color;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(g.x + 0.5, g.y + 0.5, g.w - 1, g.h - 1);
   }
 
   // Scale preview for visibility
