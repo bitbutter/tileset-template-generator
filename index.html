@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Blob Tileset Template Generator</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='0' y='0' width='10' height='10' fill='%23d62828'/><rect x='11' y='0' width='10' height='10' fill='%23d62828'/><rect x='22' y='0' width='10' height='10' fill='white'/><rect x='0' y='11' width='10' height='10' fill='%23d62828'/><rect x='11' y='11' width='10' height='10' fill='%23d62828'/><rect x='22' y='11' width='10' height='10' fill='%23d62828'/><rect x='0' y='22' width='10' height='10' fill='%23d62828'/><rect x='11' y='22' width='10' height='10' fill='%23d62828'/><rect x='22' y='22' width='10' height='10' fill='%23d62828'/></svg>">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -153,7 +154,7 @@
   <p><strong>What is this?</strong> A blob tileset is a set of 47 unique tiles that lets a game engine automatically pick the right tile for every position in a terrain grid &mdash; a technique also known as bitwise autotiling or bitmask tiling. Each of the 47 tiles handles a specific combination of filled and empty neighbors, so edges, corners, and transitions all connect seamlessly without manual placement.</p>
   <p><strong>Reading the template:</strong> The checkerboard background marks tile boundaries &mdash; adjacent tile slots alternate between two shades of gray so you can see where each slot begins and ends. Inside each slot, a small 3&times;3 bitmask indicator sits in the center. The middle cell of this 3&times;3 grid (always <span style="color:#d62828">red</span>) represents the tile itself. The 8 surrounding cells represent the 8 neighboring positions in the game world (up, down, left, right, and the four diagonals). <span style="color:#d62828">Red</span> = a tile of the same terrain type (e.g. another wall tile, another grass tile) is present in that neighboring position; white = no matching tile there (an edge, corner, or open space). For example, a tile whose indicator is entirely <span style="color:#d62828">red</span> (all 9 cells) is a center piece &mdash; it has matching terrain on every side. A tile with only the center cell <span style="color:#d62828">red</span> is an isolated piece with no matching neighbors at all.</p>
   <p><strong>Variations:</strong> The global default sets how many slots each of the 47 tile types gets (1 = one slot per tile type, no extra variations). You can override specific categories to give their tile types more or fewer slots. The overridable categories are: Center (1 tile type), Straight Edges (4 tile types &mdash; edge pieces where both corner neighbors along that edge are also filled), Inner Corners (15 tile types), Outer Corners (8 tile types), and Corridors (2 tile types &mdash; single-cell-wide passages running north&ndash;south and east&ndash;west). The remaining 17 tile types (isolated, dead-ends, partial transitions, etc.) always use the global default. Categories like center and straight edges often benefit from extra variations to avoid visual repetition in large filled areas. Leave an override field empty to use the global default for that category.</p>
-  <p><strong>Layout:</strong> Tile types with more than one variation are grouped together. Each multi-variation group gets its own colored checkerboard pattern (a unique bright/dark color pair) so you can visually distinguish one group from another. Each group is packed into rows targeting a roughly square shape. Tile types with exactly one variation use the standard gray checkerboard and are placed individually to fill remaining space across the layout. The 17 tile types outside the five named categories are not clustered together &mdash; they are distributed individually wherever space allows.</p>
+  <p><strong>Layout:</strong> Each multi-variation group gets its own row, flush against the right edge, so that adding more variations later extends the image rightward while keeping slots adjacent. Each group has its own colored checkerboard pattern (a unique bright/dark color pair) to visually distinguish it. Single-variation tiles use the standard gray checkerboard and fill the left side of rows. The overall width targets a roughly square shape.</p>
   <p><strong>Workflow:</strong> Download the PNG template and duplicate it. Paint your tile art into each slot of the copy &mdash; each slot fills one full checkerboard cell, edge-to-edge. The 3&times;3 bitmask indicators are visual guides only; paint over them in your copy. Keep the original template as a reference for identifying which tile is which when setting up bitmask values in your game engine.</p>
 </div>
 
@@ -312,9 +313,8 @@ function readConfig() {
   };
 }
 
-// --- Two-pass packing: variation groups first, then fill gaps with singles ---
+// --- Packing: each variation group gets its own row (right-aligned), singles fill left ---
 function twoPhasePack(variations, targetW) {
-  // Separate into multi-tile groups (have variations) and single-tile groups
   const multiGroups = [];
   const singleGroups = [];
   for (const group of TILE_GROUPS) {
@@ -325,39 +325,28 @@ function twoPhasePack(variations, targetW) {
     }
   }
 
-  // Pass 1: Pack multi-tile groups greedily into rows
-  const rows = []; // each row: { groups: [], width: number }
-  let currentRow = [];
-  let currentRowW = 0;
+  // Each multi-group gets its own row, right-aligned to the edge.
+  // Singles fill the left side of each row.
+  const rows = [];
+  const remaining = [...singleGroups];
 
   for (const group of multiGroups) {
     const groupW = variations[group.cat];
-    if (currentRowW + groupW > targetW && currentRow.length > 0) {
-      rows.push({ groups: currentRow, width: currentRowW });
-      currentRow = [];
-      currentRowW = 0;
-    }
-    currentRow.push(group);
-    currentRowW += groupW;
-  }
-  if (currentRow.length > 0) {
-    rows.push({ groups: currentRow, width: currentRowW });
-  }
-
-  // Pass 2: Fill remaining gaps in each row with single-tile groups
-  const remaining = [...singleGroups];
-  for (const row of rows) {
+    const gapLeft = targetW - groupW;
+    const row = { singles: [], multi: group, width: groupW };
+    // Fill left gap with singles
     while (remaining.length > 0 && row.width + 1 <= targetW) {
-      row.groups.push(remaining.shift());
+      row.singles.push(remaining.shift());
       row.width += 1;
     }
+    rows.push(row);
   }
 
-  // Any leftover singles get their own rows
+  // Leftover singles get their own rows
   while (remaining.length > 0) {
-    const row = { groups: [], width: 0 };
+    const row = { singles: [], multi: null, width: 0 };
     while (remaining.length > 0 && row.width + 1 <= targetW) {
-      row.groups.push(remaining.shift());
+      row.singles.push(remaining.shift());
       row.width += 1;
     }
     rows.push(row);
@@ -413,20 +402,25 @@ function computeLayout(config) {
 
   for (let r = 0; r < packedRows.length; r++) {
     const row = packedRows[r];
-    let x = 0;
     const y = r * th;
 
-    for (const group of row.groups) {
-      const vars = variations[group.cat];
-      const color = vars > 1 ? GROUP_COLORS[colorIdx % GROUP_COLORS.length] : null;
+    // Place singles on the left
+    let x = 0;
+    for (const group of row.singles) {
+      positions.push({ mask: group.mask, x, y, color: null });
       colorIdx++;
+      x += tw;
+    }
 
-      // Place each slot (base + variations)
+    // Place multi-variation group flush right
+    if (row.multi) {
+      const vars = variations[row.multi.cat];
+      const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
+      colorIdx++;
+      const groupX = (targetW - vars) * tw;
       for (let v = 0; v < vars; v++) {
-        positions.push({ mask: group.mask, x: x + v * tw, y, color });
+        positions.push({ mask: row.multi.mask, x: groupX + v * tw, y, color });
       }
-
-      x += vars * tw;
     }
   }
 
